@@ -14,6 +14,8 @@ const {
   recordOutbound,
   recordError,
   recordForgetMe,
+  recordStateUpdate,
+  recordSessionEngagement,
 } = require("../lib/analytics");
 
 // Vercel doesn't auto-parse urlencoded bodies, so we need to do it manually
@@ -63,6 +65,11 @@ module.exports = async function handler(req, res) {
 
     // Load conversation history for this user (keyed by phone number)
     const session = await getSession(from);
+    const isNewUser = !session || !session.messages || session.messages.length === 0;
+
+    // Track session engagement (new vs returning)
+    await recordSessionEngagement(from, isNewUser);
+
     const messages = buildMessages(LUNA_SYSTEM_PROMPT, session, incomingMessage);
 
     const completion = await openai.chat.completions.create({
@@ -88,6 +95,12 @@ module.exports = async function handler(req, res) {
       reply,
       currentState
     );
+
+    // Track state updates for conversation analytics
+    if (stateUpdate) {
+      const updatedState = { ...currentState, ...stateUpdate };
+      await recordStateUpdate(from, updatedState);
+    }
 
     // Persist conversation + state updates for next turn
     await appendMessage(from, "user", incomingMessage);

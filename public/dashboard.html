@@ -51,6 +51,12 @@
       margin: 0;
       letter-spacing: -0.02em;
     }
+    h3 {
+      font-family: Fraunces, Georgia, serif;
+      font-weight: 600;
+      margin: 0;
+      letter-spacing: -0.01em;
+    }
     .sub { color: var(--muted); font-size: 0.9rem; margin-top: 0.35rem; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
     input[type="password"] {
@@ -200,6 +206,40 @@
       </section>
 
       <section>
+        <h2>Conversation Analytics</h2>
+
+        <div style="margin-bottom: 1.5rem;">
+          <h3 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--muted);">Demographics</h3>
+          <div id="demographics" class="grid"></div>
+        </div>
+
+        <div style="margin-bottom: 1.5rem;">
+          <h3 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--muted);">Sleep Concerns</h3>
+          <div id="concerns" class="grid"></div>
+        </div>
+
+        <div style="margin-bottom: 1.5rem;">
+          <h3 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--muted);">Severity Levels</h3>
+          <div id="severity" class="grid"></div>
+        </div>
+
+        <div style="margin-bottom: 1.5rem;">
+          <h3 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--muted);">Conversation Funnel</h3>
+          <div id="stages" class="grid"></div>
+        </div>
+
+        <div style="margin-bottom: 1.5rem;">
+          <h3 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--muted);">Popular Topics</h3>
+          <div id="branches" class="grid"></div>
+        </div>
+
+        <div style="margin-bottom: 1.5rem;">
+          <h3 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--muted);">User Behavior</h3>
+          <div id="engagement" class="grid"></div>
+        </div>
+      </section>
+
+      <section>
         <h2>Recent activity</h2>
         <div class="card" style="padding: 0; overflow: hidden;">
           <table>
@@ -294,6 +334,87 @@
             <td>${e.tokens != null ? e.tokens : "—"}</td>
           </tr>`;
         })
+        .join("");
+
+      // Render conversation analytics
+      const ca = data.conversation_analytics || {};
+
+      // Helper to render distribution cards
+      function renderDistribution(obj, emptyMsg = "No data yet") {
+        if (!obj || Object.keys(obj).length === 0) {
+          return `<div class="card" style="grid-column: 1/-1;"><p style="color: var(--muted); text-align: center;">${emptyMsg}</p></div>`;
+        }
+        const total = Object.values(obj).reduce((sum, v) => sum + v, 0);
+        return Object.entries(obj)
+          .map(([key, val]) => {
+            const pct = total > 0 ? Math.round((val / total) * 100) : 0;
+            return `<div class="card">
+              <label>${key}</label>
+              <div class="val">${val}</div>
+              <div class="hint">${pct}% of total</div>
+            </div>`;
+          })
+          .join("");
+      }
+
+      // Demographics
+      $("demographics").innerHTML = renderDistribution(
+        ca.demographics,
+        "No age data collected yet. Users will be tracked as they chat."
+      );
+
+      // Concerns
+      $("concerns").innerHTML = renderDistribution(
+        ca.concerns,
+        "No sleep concerns identified yet."
+      );
+
+      // Severity
+      $("severity").innerHTML = renderDistribution(
+        ca.severity,
+        "No severity levels captured yet."
+      );
+
+      // Stages (conversation funnel)
+      $("stages").innerHTML = renderDistribution(
+        ca.stages,
+        "No conversation stages tracked yet."
+      );
+
+      // Branches
+      if (ca.branches && Object.keys(ca.branches).length > 0) {
+        // Sort branches by count, show top 10
+        const sortedBranches = Object.entries(ca.branches)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10);
+        const branchTotal = sortedBranches.reduce((sum, [, v]) => sum + v, 0);
+        $("branches").innerHTML = sortedBranches
+          .map(([branch, count]) => {
+            const pct = branchTotal > 0 ? Math.round((count / branchTotal) * 100) : 0;
+            return `<div class="card">
+              <label>${branch}</label>
+              <div class="val">${count}</div>
+              <div class="hint">${pct}% of topics</div>
+            </div>`;
+          })
+          .join("");
+      } else {
+        $("branches").innerHTML = `<div class="card" style="grid-column: 1/-1;"><p style="color: var(--muted); text-align: center;">No conversation topics tracked yet.</p></div>`;
+      }
+
+      // Engagement metrics
+      const ss = ca.session_stats || {};
+      const em = ca.engagement || {};
+      $("engagement").innerHTML = [
+        { label: "New users", val: ss.new || 0, hint: "First-time conversations" },
+        { label: "Returning users", val: ss.returning || 0, hint: "Repeat conversations" },
+        { label: "Total sessions", val: em.total_sessions || 0, hint: "Unique conversation threads" },
+        { label: "Avg messages/session", val: em.avg_messages_per_session || 0, hint: "Message depth per user" },
+      ]
+        .map(
+          (k) =>
+            `<div class="card"><label>${k.label}</label><div class="val">${k.val}</div>${k.hint ? `<div class="hint">${k.hint}</div>` : ""}</div>`
+        )
         .join("");
 
       $("content").style.display = "block";
