@@ -9,6 +9,12 @@ const {
   extractStateFromMessages,
 } = require("../lib/conversation");
 const LUNA_SYSTEM_PROMPT = require("../lib/luna-prompt");
+const {
+  recordInbound,
+  recordOutbound,
+  recordError,
+  recordForgetMe,
+} = require("../lib/analytics");
 
 // Vercel doesn't auto-parse urlencoded bodies, so we need to do it manually
 function parseBody(req) {
@@ -25,12 +31,14 @@ module.exports = async function handler(req, res) {
     return res.status(405).send("Method Not Allowed");
   }
 
+  let senderForError = null;
   try {
     // Parse the body if not already parsed
     const body = req.body || (await parseBody(req));
 
     const incomingMessage = body.Body;
     const from = body.From;
+    senderForError = from;
 
     console.log(`Message from ${from}: ${incomingMessage}`);
     console.log(`OPENAI_API_KEY set: ${!!process.env.OPENAI_API_KEY}`);
@@ -40,6 +48,7 @@ module.exports = async function handler(req, res) {
       /\b(forget\s+me|delete\s+my\s+data|erase\s+(my\s+)?data|wipe\s+(my\s+)?(data|everything))\b/i;
     if (forgetPattern.test(incomingMessage)) {
       await deleteSession(from);
+      await recordForgetMe(from);
       const twiml = new twilio.twiml.MessagingResponse();
       twiml.message(
         "Done \u2014 all your data has been wiped. If you ever want to chat again, just send me a message and we\u2019ll start fresh. Take care! \ud83d\udc99"
@@ -47,6 +56,8 @@ module.exports = async function handler(req, res) {
       res.setHeader("Content-Type", "text/xml");
       return res.status(200).send(twiml.toString());
     }
+
+    await recordInbound(from);
 
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -61,6 +72,7 @@ module.exports = async function handler(req, res) {
     });
 
     const reply = completion.choices[0].message.content;
+    await recordOutbound(from, completion.usage);
 
     // Extract state updates from the conversation (keyword matching, no extra AI calls)
     const currentState = session?.state || {
@@ -87,6 +99,12 @@ module.exports = async function handler(req, res) {
     return res.status(200).send(twiml.toString());
   } catch (error) {
     console.error("Webhook error:", error);
+
+    try {
+      if (senderForError) await recordError(senderForError);
+    } catch (_) {
+      /* ignore analytics errors */
+    }
 
     const twiml = new twilio.twiml.MessagingResponse();
     twiml.message("Sorry, something went wrong. Please try again.");

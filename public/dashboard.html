@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SleepWell+ · Operations</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0e1114;
+      --surface: #171c22;
+      --border: #2a323c;
+      --text: #e8ecf1;
+      --muted: #8b96a8;
+      --accent: #5eead4;
+      --accent-dim: #2dd4bf33;
+      --warn: #fbbf24;
+      --danger: #f87171;
+      --chart-in: #5eead4;
+      --chart-out: #a78bfa;
+      --chart-err: #fb7185;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "DM Sans", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      background-image:
+        radial-gradient(ellipse 80% 50% at 50% -20%, #1e3a3a44, transparent),
+        radial-gradient(ellipse 60% 40% at 100% 100%, #2e106544, transparent);
+    }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 2.5rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1.25rem;
+    }
+    h1 {
+      font-family: Fraunces, Georgia, serif;
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin: 0;
+      letter-spacing: -0.02em;
+    }
+    .sub { color: var(--muted); font-size: 0.9rem; margin-top: 0.35rem; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+    input[type="password"] {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.5rem 0.75rem;
+      border-radius: 8px;
+      font: inherit;
+      min-width: 200px;
+    }
+    button {
+      background: var(--accent-dim);
+      color: var(--accent);
+      border: 1px solid #2dd4bf55;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.1); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.15rem 1.25rem;
+    }
+    .card label {
+      display: block;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .card .val { font-size: 1.65rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .card .hint { font-size: 0.8rem; color: var(--muted); margin-top: 0.35rem; }
+    section { margin-bottom: 2.5rem; }
+    section h2 {
+      font-family: Fraunces, Georgia, serif;
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin: 0 0 1rem;
+      color: var(--muted);
+    }
+    .chart {
+      display: flex;
+      align-items: flex-end;
+      gap: 4px;
+      height: 180px;
+      padding: 0.5rem 0;
+      overflow-x: auto;
+    }
+    .bar-group {
+      flex: 1;
+      min-width: 36px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .bars {
+      display: flex;
+      gap: 3px;
+      align-items: flex-end;
+      height: 140px;
+      width: 100%;
+      justify-content: center;
+    }
+    .bar {
+      width: 10px;
+      border-radius: 3px 3px 0 0;
+      min-height: 2px;
+      transition: opacity 0.15s;
+    }
+    .bar:hover { opacity: 0.85; }
+    .bar.in { background: var(--chart-in); }
+    .bar.out { background: var(--chart-out); }
+    .bar.err { background: var(--chart-err); }
+    .bar-lbl { font-size: 0.65rem; color: var(--muted); writing-mode: horizontal-tb; text-align: center; }
+    .legend { display: flex; gap: 1.25rem; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.75rem; }
+    .legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+    .dot { width: 10px; height: 10px; border-radius: 2px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.6rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--muted); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .type-inbound { color: var(--chart-in); }
+    .type-outbound { color: var(--chart-out); }
+    .type-error { color: var(--danger); }
+    .type-forget_me,
+    .type-forget-me { color: var(--warn); }
+    .err-box {
+      background: #450a0a44;
+      border: 1px solid #7f1d1d88;
+      color: #fecaca;
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+    .meta { font-size: 0.8rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Operations</h1>
+        <p class="sub">SleepWell+ Luna · usage & analytics</p>
+      </div>
+      <div class="toolbar">
+        <input type="password" id="secret" placeholder="Dashboard secret" autocomplete="current-password" />
+        <button type="button" id="load">Load data</button>
+        <span class="meta" id="status"></span>
+      </div>
+    </header>
+
+    <div id="error" class="err-box" style="display: none;"></div>
+
+    <div id="content" style="display: none;">
+      <p class="meta" id="generated"></p>
+
+      <div class="grid" id="kpis"></div>
+
+      <section>
+        <h2>Last 14 days · messages</h2>
+        <div class="legend">
+          <span><i class="dot" style="background: var(--chart-in)"></i> Inbound</span>
+          <span><i class="dot" style="background: var(--chart-out)"></i> Outbound</span>
+          <span><i class="dot" style="background: var(--chart-err)"></i> Errors</span>
+        </div>
+        <div class="chart" id="chart"></div>
+      </section>
+
+      <section>
+        <h2>Recent activity</h2>
+        <div class="card" style="padding: 0; overflow: hidden;">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Type</th>
+                <th>User (hash)</th>
+                <th>Tokens</th>
+              </tr>
+            </thead>
+            <tbody id="events"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function saveSecret() {
+      const s = $("secret").value.trim();
+      if (s) sessionStorage.setItem("sw_dashboard_secret", s);
+    }
+
+    function loadSecret() {
+      const s = sessionStorage.getItem("sw_dashboard_secret");
+      if (s) $("secret").value = s;
+    }
+
+    function fmtTime(ts) {
+      return new Date(ts).toLocaleString();
+    }
+
+    function maxBars(series) {
+      let m = 1;
+      for (const d of series) {
+        m = Math.max(m, d.inbound + d.outbound + d.errors);
+      }
+      return m;
+    }
+
+    function render(data) {
+      $("generated").textContent =
+        "Updated · " + new Date(data.generated_at).toLocaleString() + " · storage: " + data.storage;
+
+      const t = data.totals;
+      $("kpis").innerHTML = [
+        { label: "Inbound (all time)", val: t.inbound },
+        { label: "Outbound (all time)", val: t.outbound },
+        { label: "Errors", val: t.errors, hint: "Webhook / OpenAI failures" },
+        { label: "Forget-me requests", val: t.forget_me },
+        { label: "OpenAI tokens (all time)", val: (t.openai_tokens || 0).toLocaleString(), hint: "~$" + (t.estimated_openai_cost_usd || 0).toFixed(4) + " est." },
+        { label: "Unique users (7d)", val: data.unique_users_7d },
+        { label: "Active sessions (Redis)", val: data.active_sessions_redis ?? "—", hint: "luna:* keys" },
+        { label: "Today · inbound", val: data.today.inbound },
+        { label: "Today · outbound", val: data.today.outbound },
+      ]
+        .map(
+          (k) =>
+            `<div class="card"><label>${k.label}</label><div class="val">${k.val}</div>${k.hint ? `<div class="hint">${k.hint}</div>` : ""}</div>`
+        )
+        .join("");
+
+      const series = data.series_14d || [];
+      const max = maxBars(series);
+      $("chart").innerHTML = series
+        .map((d) => {
+          const hi = (d.inbound / max) * 100;
+          const ho = (d.outbound / max) * 100;
+          const he = (d.errors / max) * 100;
+          return `<div class="bar-group">
+            <div class="bars">
+              <div class="bar in" style="height:${hi}%" title="in ${d.inbound}"></div>
+              <div class="bar out" style="height:${ho}%" title="out ${d.outbound}"></div>
+              <div class="bar err" style="height:${he}%" title="err ${d.errors}"></div>
+            </div>
+            <span class="bar-lbl">${d.label}</span>
+          </div>`;
+        })
+        .join("");
+
+      const ev = data.recent_events || [];
+      $("events").innerHTML = ev
+        .map((e) => {
+          const cls = "type-" + (e.type || "unknown");
+          return `<tr>
+            <td>${fmtTime(e.ts)}</td>
+            <td class="${cls}">${e.type || ""}</td>
+            <td><code>${(e.user || "").slice(0, 12)}…</code></td>
+            <td>${e.tokens != null ? e.tokens : "—"}</td>
+          </tr>`;
+        })
+        .join("");
+
+      $("content").style.display = "block";
+      $("error").style.display = "none";
+    }
+
+    async function load() {
+      saveSecret();
+      const secret = $("secret").value.trim();
+      $("status").textContent = "Loading…";
+      $("error").style.display = "none";
+
+      const base = window.location.origin;
+      const url = base + "/api/dashboard-data";
+
+      try {
+        const res = await fetch(url, {
+          headers: { Authorization: "Bearer " + secret },
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(body.error || res.statusText);
+        }
+        render(body);
+        $("status").textContent = "OK";
+      } catch (e) {
+        $("content").style.display = "none";
+        $("error").style.display = "block";
+        $("error").textContent = e.message || String(e);
+        $("status").textContent = "";
+      }
+    }
+
+    $("load").addEventListener("click", load);
+    $("secret").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") load();
+    });
+    loadSecret();
+  </script>
+</body>
+</html>
