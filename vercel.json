@@ -1,5 +1,11 @@
 {
   "rewrites": [
-    { "source": "/dashboard", "destination": "/dashboard.html" }
-  ]
+    { "source": "/dashboard", "destination": "/api/dashboard" },
+    { "source": "/dashboard.html", "destination": "/api/dashboard" }
+  ],
+  "functions": {
+    "api/dashboard.js": {
+      "includeFiles": "public/dashboard.html"
+    }
+  }
 }

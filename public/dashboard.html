@@ -172,6 +172,17 @@
       margin-bottom: 1rem;
     }
     .meta { font-size: 0.8rem; color: var(--muted); }
+    .storage-warn {
+      background: #42200644;
+      border: 1px solid #d9770644;
+      color: #fcd34d;
+      padding: 1rem 1.1rem;
+      border-radius: 8px;
+      margin-bottom: 1.25rem;
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+    .storage-warn code { font-size: 0.85em; }
   </style>
 </head>
 <body>
@@ -189,6 +200,11 @@
     </header>
 
     <div id="error" class="err-box" style="display: none;"></div>
+
+    <div id="storage-warning" class="storage-warn" style="display: none;">
+      Analytics are using <strong>in-memory</strong> storage on this server. On Vercel, counts reset between requests and will not look “live.”
+      Add <code>UPSTASH_REDIS_REST_URL</code> and <code>UPSTASH_REDIS_REST_TOKEN</code> in Vercel → Settings → Environment Variables (same as the chatbot), then redeploy.
+    </div>
 
     <div id="content" style="display: none;">
       <p class="meta" id="generated"></p>
@@ -286,6 +302,9 @@
     function render(data) {
       $("generated").textContent =
         "Updated · " + new Date(data.generated_at).toLocaleString() + " · storage: " + data.storage;
+
+      const sw = $("storage-warning");
+      if (sw) sw.style.display = data.storage === "memory" ? "block" : "none";
 
       const t = data.totals;
       $("kpis").innerHTML = [

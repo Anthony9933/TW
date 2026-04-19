@@ -75,8 +75,10 @@ module.exports = async function handler(req, res) {
     const isNewUser = !session || !session.messages || session.messages.length === 0;
     const isFirstMessage = isNewUser || !session?.state?.hasSeenWelcome;
 
-    // Track session engagement (new vs returning)
-    await recordSessionEngagement(from, isNewUser);
+    // Track session engagement only on first message of a session
+    if (isNewUser || isFirstMessage) {
+      await recordSessionEngagement(from, isNewUser);
+    }
 
     // Track conversation count and date
     if (session?.state) {
@@ -190,10 +192,20 @@ module.exports = async function handler(req, res) {
       delete stateUpdate.sleepPatterns;
     }
 
-    // Track state updates for conversation analytics
+    // Track state updates for conversation analytics (only send the delta)
     if (stateUpdate) {
-      const updatedState = { ...currentState, ...stateUpdate };
-      await recordStateUpdate(from, updatedState);
+      // For branchesVisited, only send newly added branches (not the full array)
+      const deltaForAnalytics = { ...stateUpdate };
+      if (deltaForAnalytics.branchesVisited) {
+        const oldBranches = new Set(currentState.branchesVisited || []);
+        deltaForAnalytics.branchesVisited = deltaForAnalytics.branchesVisited.filter(
+          (b) => !oldBranches.has(b)
+        );
+        if (deltaForAnalytics.branchesVisited.length === 0) {
+          delete deltaForAnalytics.branchesVisited;
+        }
+      }
+      await recordStateUpdate(from, deltaForAnalytics);
     }
 
     // Persist conversation + state updates for next turn
