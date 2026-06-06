@@ -3,9 +3,11 @@ const OpenAI = require("openai");
 const querystring = require("querystring");
 const {
   getSession,
+  saveSession,
   appendMessage,
   buildMessages,
   deleteSession,
+  createEmptySession,
   extractStateFromMessages,
   addGoal,
   getGoalsNeedingFollowUp,
@@ -14,6 +16,7 @@ const {
   updateSleepPattern,
 } = require("../lib/conversation");
 const LUNA_SYSTEM_PROMPT = require("../lib/luna-prompt");
+const PRIVACY_NOTICE = require("../lib/privacy-notice");
 const {
   recordInbound,
   recordOutbound,
@@ -66,12 +69,33 @@ module.exports = async function handler(req, res) {
       return res.status(200).send(twiml.toString());
     }
 
+    // Load conversation history for this user (keyed by phone number)
+    const session = await getSession(from);
+
+    // First contact: send the privacy & compliance notice verbatim, before any AI runs.
+    if (!session?.state?.privacyNoticeSent) {
+      await recordInbound(from);
+      await recordSessionEngagement(from, true);
+
+      const sess = session || createEmptySession();
+      sess.state.privacyNoticeSent = true;
+      sess.state.hasSeenWelcome = true;
+      // Preserve their first message so they don't have to repeat it next turn.
+      sess.messages.push({ role: "user", content: incomingMessage });
+      sess.messages.push({ role: "assistant", content: PRIVACY_NOTICE });
+      await saveSession(from, sess);
+      await recordOutbound(from, null);
+
+      const twiml = new twilio.twiml.MessagingResponse();
+      twiml.message(PRIVACY_NOTICE);
+      res.setHeader("Content-Type", "text/xml");
+      return res.status(200).send(twiml.toString());
+    }
+
     await recordInbound(from);
 
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    // Load conversation history for this user (keyed by phone number)
-    const session = await getSession(from);
     const isNewUser = !session || !session.messages || session.messages.length === 0;
     const isFirstMessage = isNewUser || !session?.state?.hasSeenWelcome;
 
