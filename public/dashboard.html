@@ -59,7 +59,7 @@
     }
     .sub { color: var(--muted); font-size: 0.9rem; margin-top: 0.35rem; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
-    input[type="password"] {
+    input[type="password"], input[type="text"] {
       background: var(--surface);
       border: 1px solid var(--border);
       color: var(--text);
@@ -193,8 +193,12 @@
         <p class="sub">SleepWell+ Luna · usage & analytics</p>
       </div>
       <div class="toolbar">
-        <input type="password" id="secret" placeholder="Dashboard secret" autocomplete="current-password" />
-        <button type="button" id="load">Load data</button>
+        <form id="loginForm" autocomplete="on" style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+          <input type="text" id="username" placeholder="Username" autocomplete="username" />
+          <input type="password" id="password" placeholder="Password" autocomplete="current-password" />
+          <button type="submit" id="login">Sign in</button>
+        </form>
+        <button type="button" id="logout" style="display: none;">Sign out</button>
         <span class="meta" id="status"></span>
       </div>
     </header>
@@ -277,14 +281,14 @@
   <script>
     const $ = (id) => document.getElementById(id);
 
-    function saveSecret() {
-      const s = $("secret").value.trim();
-      if (s) sessionStorage.setItem("sw_dashboard_secret", s);
+    function showLoggedIn() {
+      $("loginForm").style.display = "none";
+      $("logout").style.display = "";
     }
-
-    function loadSecret() {
-      const s = sessionStorage.getItem("sw_dashboard_secret");
-      if (s) $("secret").value = s;
+    function showLoggedOut() {
+      $("loginForm").style.display = "flex";
+      $("logout").style.display = "none";
+      $("content").style.display = "none";
     }
 
     function fmtTime(ts) {
@@ -443,37 +447,72 @@
     }
 
     async function load() {
-      saveSecret();
-      const secret = $("secret").value.trim();
       $("status").textContent = "Loading…";
       $("error").style.display = "none";
-
-      const base = window.location.origin;
-      const url = base + "/api/dashboard-data";
-
       try {
-        const res = await fetch(url, {
-          headers: { Authorization: "Bearer " + secret },
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(body.error || res.statusText);
+        const res = await fetch("/api/dashboard-data", { credentials: "same-origin" });
+        if (res.status === 401) {
+          showLoggedOut();
+          $("status").textContent = "";
+          return false;
         }
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || res.statusText);
         render(body);
-        $("status").textContent = "OK";
+        showLoggedIn();
+        $("status").textContent = "Signed in";
+        return true;
       } catch (e) {
-        $("content").style.display = "none";
         $("error").style.display = "block";
         $("error").textContent = e.message || String(e);
         $("status").textContent = "";
+        return false;
       }
     }
 
-    $("load").addEventListener("click", load);
-    $("secret").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") load();
-    });
-    loadSecret();
+    async function signIn(ev) {
+      if (ev) ev.preventDefault();
+      $("error").style.display = "none";
+      $("status").textContent = "Signing in…";
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            username: $("username").value.trim(),
+            password: $("password").value,
+          }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || "Sign in failed");
+        $("password").value = "";
+        await load();
+      } catch (e) {
+        $("status").textContent = "";
+        $("error").style.display = "block";
+        $("error").textContent = e.message || String(e);
+      }
+    }
+
+    async function signOut() {
+      try {
+        await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ logout: true }),
+        });
+      } catch (_) {}
+      showLoggedOut();
+      $("status").textContent = "Signed out";
+    }
+
+    $("loginForm").addEventListener("submit", signIn);
+    $("logout").addEventListener("click", signOut);
+
+    // Reuse an existing session cookie if present.
+    load();
   </script>
 </body>
 </html>

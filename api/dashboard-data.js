@@ -1,4 +1,5 @@
 const { getDashboardSnapshot } = require("../lib/analytics");
+const { verifySession } = require("../lib/auth");
 
 /**
  * GET /api/dashboard-data
@@ -23,21 +24,25 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  const auth = req.headers.authorization || "";
-  let qsecret;
-  try {
-    const u = new URL(req.url || "/", "http://localhost");
-    qsecret = u.searchParams.get("secret");
-  } catch (_) {
-    qsecret = undefined;
-  }
-  if (!qsecret && typeof req.query === "object" && req.query?.secret) {
-    qsecret = req.query.secret;
-  }
-  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : qsecret;
+  // Primary: a valid session cookie from /api/login.
+  // Fallback: Bearer token / ?secret= (for API/script access).
+  if (!verifySession(req)) {
+    const auth = req.headers.authorization || "";
+    let qsecret;
+    try {
+      const u = new URL(req.url || "/", "http://localhost");
+      qsecret = u.searchParams.get("secret");
+    } catch (_) {
+      qsecret = undefined;
+    }
+    if (!qsecret && typeof req.query === "object" && req.query?.secret) {
+      qsecret = req.query.secret;
+    }
+    const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : qsecret;
 
-  if (token !== secret) {
-    return res.status(401).json({ error: "Unauthorized" });
+    if (token !== secret) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
   }
 
   try {
