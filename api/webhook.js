@@ -127,8 +127,11 @@ module.exports = async function handler(req, res) {
         }).join("\n");
       }
     }
-
-    const messages = buildMessages(LUNA_SYSTEM_PROMPT + goalsContext, session, incomingMessage);
+    const messages = buildMessages(
+      LUNA_SYSTEM_PROMPT + goalsContext,
+      session,
+      incomingMessage
+    );
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
