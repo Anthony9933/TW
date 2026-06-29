@@ -8,6 +8,8 @@ const {
   buildMessages,
   deleteSession,
   createEmptySession,
+  parseReplyAndState,
+  stateUpdateFromMeta,
   extractStateFromMessages,
   addGoal,
   getGoalsNeedingFollowUp,
@@ -134,7 +136,11 @@ module.exports = async function handler(req, res) {
       max_tokens: 1500,
     });
 
-    const reply = completion.choices[0].message.content;
+    const rawReply = completion.choices[0].message.content;
+    // Split the model's hidden state metadata off the user-facing text. `reply`
+    // is what we show, store, and scan for goals/tips; `meta` drives analytics.
+    const { visibleReply, meta } = parseReplyAndState(rawReply);
+    const reply = visibleReply;
     await recordOutbound(from, completion.usage);
 
     // Auto-detect and track goals from Luna's response
@@ -194,7 +200,11 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    // Extract state updates from the conversation (keyword matching, no extra AI calls)
+    // Derive state updates. Primary path: the model's hidden metadata block,
+    // which is classified in canonical English regardless of conversation
+    // language — this is what makes analytics work for Arabic conversations.
+    // Fallback: English keyword matching, which still catches sleep-pattern
+    // details (bedtimes, durations) and backstops a missing/invalid block.
     const currentState = session?.state || {
       ageRange: null,
       mainReason: null,
@@ -203,11 +213,28 @@ module.exports = async function handler(req, res) {
       escalationIssued: false,
       stage: "entry",
     };
-    const stateUpdate = extractStateFromMessages(
+
+    const metaUpdate = stateUpdateFromMeta(meta, currentState);
+    const keywordUpdate = extractStateFromMessages(
       incomingMessage,
       reply,
       currentState
     );
+
+    // Merge: keyword findings first, then let the model's metadata win on any
+    // overlapping field (it understands intent across languages, regex doesn't).
+    // branchesVisited is unioned so neither source drops a branch the other found.
+    let stateUpdate = null;
+    if (keywordUpdate || metaUpdate) {
+      stateUpdate = { ...(keywordUpdate || {}), ...(metaUpdate || {}) };
+      const mergedBranches = new Set([
+        ...(keywordUpdate?.branchesVisited || []),
+        ...(metaUpdate?.branchesVisited || []),
+      ]);
+      if (mergedBranches.size > 0) {
+        stateUpdate.branchesVisited = Array.from(mergedBranches);
+      }
+    }
 
     // Handle sleep pattern updates specifically
     if (stateUpdate?.sleepPatterns && session?.state) {

@@ -244,6 +244,11 @@
         </div>
 
         <div style="margin-bottom: 1.5rem;">
+          <h3 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--muted);">Language</h3>
+          <div id="languages" class="grid"></div>
+        </div>
+
+        <div style="margin-bottom: 1.5rem;">
           <h3 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--muted);">Conversation Funnel</h3>
           <div id="stages" class="grid"></div>
         </div>
@@ -398,6 +403,21 @@
       $("severity").innerHTML = renderDistribution(
         ca.severity,
         "No severity levels captured yet."
+      );
+
+      // Language (map en/ar codes to readable labels)
+      const languageLabels = { en: "English", ar: "Arabic" };
+      const languagesData = ca.languages
+        ? Object.fromEntries(
+            Object.entries(ca.languages).map(([code, val]) => [
+              languageLabels[code] || code,
+              val,
+            ])
+          )
+        : null;
+      $("languages").innerHTML = renderDistribution(
+        languagesData,
+        "No language data captured yet."
       );
 
       // Stages (conversation funnel)
