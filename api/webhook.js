@@ -2,9 +2,8 @@ const twilio = require("twilio");
 const OpenAI = require("openai");
 const querystring = require("querystring");
 const {
-  getSession,
+  getSessionResult,
   saveSession,
-  appendMessage,
   buildMessages,
   deleteSession,
   createEmptySession,
@@ -27,17 +26,76 @@ const {
   recordStateUpdate,
   recordSessionEngagement,
   recordGoalCreated,
-  recordGoalCompleted,
 } = require("../lib/analytics");
 
-// Vercel doesn't auto-parse urlencoded bodies, so we need to do it manually
-function parseBody(req) {
+// Vercel doesn't always auto-parse urlencoded bodies, so read the raw stream
+// ourselves. We keep the raw text because Twilio signature validation needs the
+// exact parameters that were posted.
+function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = "";
     req.on("data", (chunk) => (data += chunk));
-    req.on("end", () => resolve(querystring.parse(data)));
+    req.on("end", () => resolve(data));
     req.on("error", reject);
   });
+}
+
+async function parseRequest(req) {
+  if (req.body && typeof req.body === "object" && Object.keys(req.body).length > 0) {
+    return { params: req.body, raw: null };
+  }
+  const raw = typeof req.body === "string" ? req.body : await readBody(req);
+  return { params: querystring.parse(raw || ""), raw };
+}
+
+/**
+ * Candidate public URLs this request could have been signed against. Twilio
+ * signs the exact URL configured in its console; behind Vercel's proxy the
+ * original host arrives in `x-forwarded-host`, so try both it and `host`.
+ */
+function candidateUrls(req) {
+  if (process.env.TWILIO_WEBHOOK_URL) return [process.env.TWILIO_WEBHOOK_URL];
+  const proto = (req.headers["x-forwarded-proto"] || "https").split(",")[0].trim();
+  const hosts = [req.headers["x-forwarded-host"], req.headers.host]
+    .filter(Boolean)
+    .map((h) => String(h).split(",")[0].trim());
+  const path = req.url || "/api/webhook";
+  return [...new Set(hosts)].map((h) => `${proto}://${h}${path}`);
+}
+
+/**
+ * Verify the request really came from Twilio.
+ *
+ * Enabled whenever TWILIO_AUTH_TOKEN is set. Without this the webhook is an
+ * open endpoint: anyone can post a `From` number and burn OpenAI credit or
+ * poison another user's conversation history. Set
+ * TWILIO_VALIDATE_SIGNATURE=false to opt out (useful for local testing).
+ */
+function isValidTwilioRequest(req, params) {
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  if (!token) return true; // nothing to validate against
+  if (String(process.env.TWILIO_VALIDATE_SIGNATURE).toLowerCase() === "false") return true;
+
+  const signature = req.headers["x-twilio-signature"];
+  if (!signature) return false;
+
+  return candidateUrls(req).some((url) => {
+    try {
+      return twilio.validateRequest(token, signature, url, params);
+    } catch (_) {
+      return false;
+    }
+  });
+}
+
+/** Send one or more TwiML messages (each becomes a separate WhatsApp message). */
+function sendReply(res, ...messages) {
+  const twiml = new twilio.twiml.MessagingResponse();
+  for (const m of messages) {
+    if (m) twiml.message(m);
+  }
+  res.setHeader("Content-Type", "text/xml");
+  return res.status(200).send(twiml.toString());
 }
 
 module.exports = async function handler(req, res) {
@@ -47,15 +105,24 @@ module.exports = async function handler(req, res) {
 
   let senderForError = null;
   try {
-    // Parse the body if not already parsed
-    const body = req.body || (await parseBody(req));
+    const { params } = await parseRequest(req);
 
-    const incomingMessage = body.Body;
-    const from = body.From;
+    if (!isValidTwilioRequest(req, params)) {
+      console.warn("[luna] rejected request with missing/invalid Twilio signature");
+      return res.status(403).send("Forbidden");
+    }
+
+    const from = params.From;
     senderForError = from;
 
-    console.log(`Message from ${from}: ${incomingMessage}`);
-    console.log(`OPENAI_API_KEY set: ${!!process.env.OPENAI_API_KEY}`);
+    if (!from) {
+      return res.status(400).send("Missing From");
+    }
+
+    const incomingMessage = typeof params.Body === "string" ? params.Body.trim() : "";
+    const mediaCount = parseInt(params.NumMedia || "0", 10) || 0;
+
+    console.log(`[luna] message from ${from} (${incomingMessage.length} chars, ${mediaCount} media)`);
 
     // Handle "forget me" requests — wipe session and respond immediately
     const forgetPattern =
@@ -63,19 +130,36 @@ module.exports = async function handler(req, res) {
     if (forgetPattern.test(incomingMessage)) {
       await deleteSession(from);
       await recordForgetMe(from);
-      const twiml = new twilio.twiml.MessagingResponse();
-      twiml.message(
+      return sendReply(
+        res,
         "Done \u2014 all your data has been wiped. If you ever want to chat again, just send me a message and we\u2019ll start fresh. Take care! \ud83d\udc99"
       );
-      res.setHeader("Content-Type", "text/xml");
-      return res.status(200).send(twiml.toString());
     }
 
-    // Load conversation history for this user (keyed by phone number)
-    const session = await getSession(from);
+    // Load conversation history for this user (keyed by phone number).
+    // `storeOk` tells us whether the read actually succeeded — see below.
+    const { session, durable } = await getSessionResult(from);
+    const needsPrivacyNotice = !session?.state?.privacyNoticeSent;
 
-    // First contact: send the privacy & compliance notice verbatim, before any AI runs.
-    if (!session?.state?.privacyNoticeSent) {
+    if (!durable) {
+      // Loud on purpose. Without storage that survives between invocations we
+      // cannot tell a returning user from a new one, so every message looks
+      // like first contact. Check /api/dashboard-data for storage health.
+      console.error(
+        "[luna] NO DURABLE SESSION STORE \u2014 conversations will not be remembered. " +
+          "Configure Redis (see README \u203a Troubleshooting)."
+      );
+    }
+
+    // First contact: send the privacy & compliance notice verbatim, before any
+    // AI runs. Guarded on `storeOk`: if the session store is unreachable we
+    // cannot tell a new user from a returning one, and replaying the notice on
+    // every message would leave the bot stuck repeating its intro forever.
+    // Standalone first-contact notice. Only when storage is durable — otherwise
+    // every cold start would look like first contact and the bot would repeat
+    // its intro forever instead of ever answering. The degraded path below
+    // delivers the same notice alongside a real reply.
+    if (durable && needsPrivacyNotice) {
       await recordInbound(from);
       await recordSessionEngagement(from, true);
 
@@ -83,15 +167,29 @@ module.exports = async function handler(req, res) {
       sess.state.privacyNoticeSent = true;
       sess.state.hasSeenWelcome = true;
       // Preserve their first message so they don't have to repeat it next turn.
-      sess.messages.push({ role: "user", content: incomingMessage });
+      if (incomingMessage) {
+        sess.messages.push({ role: "user", content: incomingMessage });
+      }
       sess.messages.push({ role: "assistant", content: PRIVACY_NOTICE });
       await saveSession(from, sess);
       await recordOutbound(from, null);
 
-      const twiml = new twilio.twiml.MessagingResponse();
-      twiml.message(PRIVACY_NOTICE);
-      res.setHeader("Content-Type", "text/xml");
-      return res.status(200).send(twiml.toString());
+      return sendReply(res, PRIVACY_NOTICE);
+    }
+
+    // Voice notes, images and stickers arrive with an empty Body. Answer those
+    // directly instead of forwarding an empty turn to the model. Placed after
+    // the privacy gate so a new user still receives the notice first.
+    if (!incomingMessage) {
+      if (mediaCount > 0) {
+        return sendReply(
+          res,
+          "I can only read text messages right now \u2014 could you type that out for me? \ud83d\udc99"
+        );
+      }
+      return res
+        .status(200)
+        .send(new twilio.twiml.MessagingResponse().toString());
     }
 
     await recordInbound(from);
@@ -263,13 +361,26 @@ module.exports = async function handler(req, res) {
     }
 
     // Persist conversation + state updates for next turn
-    await appendMessage(from, "user", incomingMessage);
-    await appendMessage(from, "assistant", reply, stateUpdate);
+    // Persist in one write. Re-reading the session here (as two separate
+    // appendMessage calls used to) would discard everything this turn mutated
+    // in memory — goals, tips given, conversation count, sleep patterns.
+    const toPersist = session || createEmptySession();
+    toPersist.messages.push({ role: "user", content: incomingMessage });
+    toPersist.messages.push({ role: "assistant", content: reply });
+    if (stateUpdate && typeof stateUpdate === "object") {
+      toPersist.state = { ...toPersist.state, ...stateUpdate };
+    }
+    toPersist.state.privacyNoticeSent = true;
+    await saveSession(from, toPersist);
 
-    const twiml = new twilio.twiml.MessagingResponse();
-    twiml.message(reply);
-    res.setHeader("Content-Type", "text/xml");
-    return res.status(200).send(twiml.toString());
+    // Degraded mode: storage is not durable, so the standalone notice branch
+    // was skipped. Send the disclosure ahead of the answer as its own message
+    // so the user still receives it and the conversation still moves forward.
+    if (!durable && needsPrivacyNotice) {
+      return sendReply(res, PRIVACY_NOTICE, reply);
+    }
+
+    return sendReply(res, reply);
   } catch (error) {
     console.error("Webhook error:", error);
 
@@ -279,10 +390,6 @@ module.exports = async function handler(req, res) {
       /* ignore analytics errors */
     }
 
-    const twiml = new twilio.twiml.MessagingResponse();
-    twiml.message("Sorry, something went wrong. Please try again.");
-
-    res.setHeader("Content-Type", "text/xml");
-    return res.status(200).send(twiml.toString());
+    return sendReply(res, "Sorry, something went wrong. Please try again.");
   }
 };

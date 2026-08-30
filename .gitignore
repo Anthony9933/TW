@@ -1,4 +1,9 @@
 node_modules/
-.env
 .vercel
-.env*
+.claude/
+.DS_Store
+
+# Local environment files. `.env.example` is intentionally tracked.
+.env
+.env.*
+!.env.example

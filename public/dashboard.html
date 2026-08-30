@@ -205,10 +205,7 @@
 
     <div id="error" class="err-box" style="display: none;"></div>
 
-    <div id="storage-warning" class="storage-warn" style="display: none;">
-      Analytics are using <strong>in-memory</strong> storage on this server. On Vercel, counts reset between requests and will not look “live.”
-      Add <code>UPSTASH_REDIS_REST_URL</code> and <code>UPSTASH_REDIS_REST_TOKEN</code> in Vercel → Settings → Environment Variables (same as the chatbot), then redeploy.
-    </div>
+    <div id="storage-warning" class="storage-warn" style="display: none;"></div>
 
     <div id="content" style="display: none;">
       <p class="meta" id="generated"></p>
@@ -313,7 +310,24 @@
         "Updated · " + new Date(data.generated_at).toLocaleString() + " · storage: " + data.storage;
 
       const sw = $("storage-warning");
-      if (sw) sw.style.display = data.storage === "memory" ? "block" : "none";
+      if (sw) {
+        // "redis-unreachable" is the important one: credentials are configured
+        // but the database does not answer, which also stops the chatbot from
+        // remembering anything. Say so plainly instead of showing zeros.
+        const notes = {
+          memory:
+            "Analytics are using <strong>in-memory</strong> storage. On Vercel, counts reset between requests and will not look “live.” " +
+            "Add <code>UPSTASH_REDIS_REST_URL</code> + <code>UPSTASH_REDIS_REST_TOKEN</code> (or <code>REDIS_URL</code>) in Vercel → Settings → Environment Variables, then redeploy.",
+          "redis-unreachable":
+            "<strong>Redis is configured but not responding.</strong> The chatbot cannot remember conversations in this state and will repeat its intro message. " +
+            "Check that the database still exists and that its credentials are current, then redeploy.",
+          "redis-misconfigured":
+            "<strong>Redis credentials are present but unusable.</strong> The URL or token is malformed — verify them in Vercel → Settings → Environment Variables.",
+        };
+        const note = notes[data.storage];
+        sw.innerHTML = note || "";
+        sw.style.display = note ? "block" : "none";
+      }
 
       const t = data.totals;
       $("kpis").innerHTML = [
